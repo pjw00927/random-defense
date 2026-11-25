@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>랜덤 디펜스: 최단 클리어</title>
+<style>
+:root{--bg:#eceef3;--fg:#1a1c24;--card:#fff;--bd:#cfd3de;--ac:#5b5bd6;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#13151b;--fg:#e8eaf2;--card:#21242e;--bd:#373b48;--ac:#8a8aff;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#13151b;--fg:#e8eaf2;--card:#21242e;--bd:#373b48;--ac:#8a8aff;color-scheme:dark}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:"Noto Sans KR",system-ui,-apple-system,sans-serif;display:flex;justify-content:center}
+#app{width:100%;max-width:680px;padding:10px}
+#w{position:relative}
+canvas{width:100%;display:block;border-radius:12px;background:#1c2030;touch-action:none}
+#h{font-size:14px;margin:8px 2px 2px;font-weight:600}
+#m{font-size:13px;min-height:18px;margin:2px;opacity:.8}
+#i{font-size:13px;margin:2px;min-height:18px}
+.bar{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+button{flex:1;min-width:84px;padding:11px 6px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--fg);font:inherit;font-size:14px;cursor:pointer}
+button:disabled{opacity:.4;cursor:default}
+button.p{background:var(--ac);color:#fff;border-color:var(--ac)}
+#ov{position:absolute;inset:0;background:rgba(10,12,20,.9);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:16px;text-align:center;border-radius:12px;overflow:auto}
+#ov h2{margin:0;font-size:24px}#ov p{margin:0;font-size:14px;line-height:1.5;max-width:420px}
+#sh{display:flex;flex-direction:column;gap:6px;width:min(320px,100%)}
+#ov button{color:#fff;background:#2b3050;border-color:#4a517a;flex:none}
+#ov button.p{background:#5b5bd6;border-color:#5b5bd6}
+</style></head><body>
+<div id="app">
+<div id="w"><canvas id="c" width="640" height="480"></canvas>
+<div id="ov"><h2 id="ovt"></h2><p id="ovs"></p><p id="st"></p><div id="sh"></div><button class="p" id="go">게임 시작</button></div></div>
+<div id="h"></div><div id="i"></div><div id="m"></div>
+<div class="bar"><button class="p" id="bd">뽑기</button><button id="bu">강화</button><button id="bl">판매</button><button id="bm">이동</button></div>
+<div class="bar"><button id="bn">다음 라운드</button><button id="bs">속도 ×1</button></div>
+</div>
+<script>
+const $=id=>document.getElementById(id),C=$('c'),X=C.getContext('2d');
+const PATH=[[50,50],[590,50],[590,430],[50,430]],SEG=[540,380,540,380],LEN=1840;
+const SLOTS=[[140,95],[250,95],[360,95],[470,95],[140,385],[250,385],[360,385],[470,385],[95,190],[95,290],[545,190],[545,290]];
+const T=[{n:'하급',c:'#9aa3b2',dmg:9,rng:95,cd:.7},{n:'중급',c:'#4cc9a0',dmg:24,rng:105,cd:.7},{n:'고급',c:'#b06cff',dmg:70,rng:115,cd:.65},{n:'최고급',c:'#ffb23e',dmg:200,rng:130,cd:.6}];
+const RATE=[.6,.3,.07,.03],UP=[.85,.65,.45,.25,.10],UPC=[30,50,80,120,180],REF=[15,25,45,90],DRAW=40,MAXR=20;
+const SH=[{k:'sg',n:'시작 골드 +20',c:l=>12*(l+1)},{k:'dm',n:'공격력 +2%',c:l=>15*(l+1)}];
+const meta=Object.assign({sh:0,sg:0,dm:0,best:null,runs:0},(()=>{try{return JSON.parse(localStorage.getItem('rdef1'))||{}}catch(e){return{}}})());
+const save=()=>{try{localStorage.setItem('rdef1',JSON.stringify(meta))}catch(e){}};
+const KIND=[{n:'단일',m:1,cd:1,rad:0},{n:'폭발',m:.7,cd:1.35,rad:60}];
+const dmgOf=(u,l=u.l)=>T[u.t].dmg*KIND[u.k].m*(1+.4*l)*(1+.02*meta.dm)*(u.s==2?2:1);
+const SP=[null,{n:'신속',c:'#ffd24a',d:'공격속도 5배'},{n:'천리안',c:'#4fd0ff',d:'전체 사정거리'},{n:'레이저',c:'#ff5577',d:'지속 레이저'}],MERGE=.3;
+const rngOf=u=>u.s==2?9999:T[u.t].rng+(u.s==3?40:0);
+const dpsOf=u=>dmgOf(u)/(T[u.t].cd*KIND[u.k].cd)*(u.s==1?5:u.s==3?3:1);
+function luck(a){if(!a.length)return null;let d=[1];for(const[p]of a){const n=Array(d.length+1).fill(0);d.forEach((v,k)=>{n[k]+=v*(1-p);n[k+1]+=v*p});d=n}const k=a.reduce((s,x)=>s+x[1],0);let b=0;for(let j=0;j<k;j++)b+=d[j];const pct=b+d[k]/2;return Math.min(10,Math.max(1,Math.ceil((1-pct)*10)||1))}
+const LK=g=>g?`${g}분위`:'-';
+let S,U,M,FX,sp=1,last=0,drag=null,sup=false;
+function pos(d){d%=LEN;for(let i=0;i<4;i++){if(d<SEG[i]){const a=PATH[i],b=PATH[(i+1)%4],t=d/SEG[i];return[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t]}d-=SEG[i]}return PATH[0]}
+const msg=t=>{$('m').textContent=t};
+function newGame(){S={r:0,t:0,rt:0,q:0,sp:0,gold:150+20*meta.sg,sel:-1,over:false,a:[],mv:false};U=Array(12).fill(null);M=[];FX=[];startRound()}
+function spawn(b){const h=20*Math.pow(1.18,S.r)*(b?14:1);M.push({d:0,hp:h,m:h,v:90*(1+S.r*.01)*(b?.7:1),b,rw:(3+Math.floor(S.r/3))*(b?10:1)})}
+function startRound(){S.r++;S.q=10+S.r;S.sp=0;S.rt=28;if(S.r%10==0)spawn(1);msg('라운드 '+S.r+(S.r%10==0?' · 보스 등장!':''))}
+function step(dt){
+ S.t+=dt;S.rt-=dt;
+ if(S.q>0){S.sp-=dt;if(S.sp<=0){S.q--;S.sp=.45;spawn(0)}}
+ for(const m of M)m.d+=m.v*dt;
+ U.forEach((u,i)=>{if(!u)return;u.cd-=dt;if(u.s!=3&&u.cd>0)return;const p=T[u.t],s=SLOTS[i];let b=null;
+  for(const m of M){const q=pos(m.d);if(Math.hypot(q[0]-s[0],q[1]-s[1])<=rngOf(u)&&(!b||m.d>b.d))b=m}
+  if(b){if(u.s==3){const q=pos(b.d);b.hp-=dpsOf(u)*dt;FX.push({x:s[0],y:s[1],X:q[0],Y:q[1],l:dt*1.5,c:'#ff5577',r:0,w:4});return}const k=KIND[u.k],q=pos(b.d),dm=dmgOf(u);u.cd=p.cd*k.cd*(u.s==1?.2:1);
+  if(k.rad){for(const m of M){const z=pos(m.d);if(Math.hypot(z[0]-q[0],z[1]-q[1])<=k.rad)m.hp-=dm}FX.push({x:s[0],y:s[1],X:q[0],Y:q[1],l:.18,c:p.c,r:k.rad})}
+  else{b.hp-=dm;FX.push({x:s[0],y:s[1],X:q[0],Y:q[1],l:.1,c:p.c,r:0})}}});
+ M=M.filter(m=>{if(m.hp>0)return true;S.gold+=m.rw;return false});
+ FX.forEach(f=>f.l-=dt);FX=FX.filter(f=>f.l>0);
+ if(M.length>=40)return end(false);
+ if(S.q==0&&M.length==0){if(S.r>=MAXR)return end(true);startRound()}else if(S.rt<=0&&S.r<MAXR)startRound();
+}
+function end(win){S.over=true;const g=S.r+(win?10+Math.max(0,Math.floor((540-S.t)/20)):0);meta.sh+=g;meta.runs++;if(win&&(!meta.best||S.t<meta.best))meta.best=S.t;save();
+ ov(win?'🎉 클리어!':'💀 패배',`기록 ${S.t.toFixed(1)}초 · 도달 라운드 ${S.r}<br>획득 조각 +${g}<br>이번 판 강화운 ${LK(luck(S.a))} (1분위=최고 운)`)}
+function ov(t,s){$('ov').style.display='flex';$('ovt').textContent=t;$('ovs').innerHTML=s;$('go').textContent=S&&S.r>1?'다시 도전':'게임 시작';shop()}
+function shop(){$('st').textContent=`보유 조각 ${meta.sh} · 최단 클리어 ${meta.best?meta.best.toFixed(1)+'초':'기록 없음'} · 플레이 ${meta.runs}회`;
+ const b=$('sh');b.innerHTML='';SH.forEach(s=>{const l=meta[s.k],c=s.c(l),e=document.createElement('button');
+  e.textContent=l>=5?`${s.n} (최대)`:`${s.n} · Lv${l}/5 · 조각 ${c}`;e.disabled=l>=5||meta.sh<c;
+  e.onclick=()=>{meta.sh-=c;meta[s.k]++;save();shop()};b.appendChild(e)})}
+function draw(){
+ X.fillStyle='#1c2030';X.fillRect(0,0,640,480);
+ X.strokeStyle='#2f3856';X.lineWidth=26;X.lineJoin='round';X.beginPath();X.moveTo(50,50);PATH.slice(1).forEach(p=>X.lineTo(p[0],p[1]));X.closePath();X.stroke();
+ const su=U[S.sel];if(su){const s=SLOTS[S.sel];X.strokeStyle='rgba(255,255,255,.25)';X.lineWidth=1;X.beginPath();X.arc(s[0],s[1],Math.min(rngOf(su),700),0,7);X.stroke()}
+ SLOTS.forEach((s,i)=>{X.strokeStyle=i==S.sel?(S.mv?'#ffd24a':'#fff'):'#3d4770';X.lineWidth=i==S.sel?2:1;X.strokeRect(s[0]-20,s[1]-20,40,40);const u=U[i];if(!u)return;
+  X.fillStyle=T[u.t].c;X.beginPath();if(u.k)X.rect(s[0]-14,s[1]-14,28,28);else X.arc(s[0],s[1],15,0,7);X.fill();X.fillStyle='#111';X.font='bold 14px sans-serif';X.textAlign='center';X.textBaseline='middle';X.fillText('+'+u.l,s[0],s[1]);if(u.s){X.strokeStyle=SP[u.s].c;X.lineWidth=3;X.beginPath();X.arc(s[0],s[1],21,0,7);X.stroke();X.fillStyle=SP[u.s].c;X.font='bold 11px sans-serif';X.fillText(SP[u.s].n,s[0],s[1]-28)}});
+ if(drag&&drag.on&&U[drag.k]){X.globalAlpha=.7;X.fillStyle=T[U[drag.k].t].c;X.beginPath();X.arc(drag.x,drag.y,15,0,7);X.fill();X.globalAlpha=1}
+ FX.forEach(f=>{X.strokeStyle=f.c;X.lineWidth=f.w||2;X.beginPath();if(f.r){X.fillStyle=f.c+'44';X.arc(f.X,f.Y,f.r*(1-f.l/.18*.3),0,7);X.fill()}else{X.moveTo(f.x,f.y);X.lineTo(f.X,f.Y)}X.stroke()});
+ for(const m of M){const q=pos(m.d),r=m.b?14:8;X.fillStyle=`hsl(${(S.r*37)%360},70%,60%)`;X.beginPath();X.arc(q[0],q[1],r,0,7);X.fill();
+  X.fillStyle='#000a';X.fillRect(q[0]-12,q[1]-r-6,24,3);X.fillStyle='#5f5';X.fillRect(q[0]-12,q[1]-r-6,24*Math.max(0,m.hp/m.m),3)}
+}
+function info(u){if(!u)return`이번 판 강화운 ${LK(luck(S.a))} (1분위=최고 운, 10분위=최저)`;const k=KIND[u.k],d=dmgOf(u);
+ return`${u.s?SP[u.s].n+' ':''}${T[u.t].n} ${k.n}형 +${u.l} · 공격력 ${Math.round(d)}`+(u.l<5?` (다음 ${Math.round(dmgOf(u,u.l+1))})`:' (최대)')+` · 초당 ${Math.round(dpsOf(u))}`+(u.s?` · ${SP[u.s].d}`:'')+(k.rad?` · 범위 공격 ${k.rad}`:'')+` · 강화운 ${LK(luck(u.a))}`}
+function hud(){const u=U[S.sel];$('i').textContent=info(u);
+ $('h').textContent=`라운드 ${S.r}/${MAXR} · ${S.t.toFixed(1)}초 · 골드 ${Math.floor(S.gold)} · 몬스터 ${M.length}/40`+(u?` · 선택: ${T[u.t].n} +${u.l}`:'');
+ $('bd').textContent=`뽑기 ${DRAW}`;$('bd').disabled=S.over||S.gold<DRAW||U.indexOf(null)<0;
+ $('bu').textContent=u?(u.l>=5?'강화 최대':`강화 ${UPC[u.l]} (${Math.round(UP[u.l]*100)}%)`):'강화';$('bu').disabled=S.over||!u||u.l>=5||S.gold<UPC[u.l];
+ $('bl').textContent=u?`판매 +${REF[u.t]+10*u.l}`:'판매';$('bl').disabled=S.over||!u;if(!u)S.mv=false;$('bm').textContent=S.mv?'이동 취소':'이동';$('bm').disabled=S.over||!u;
+ $('bn').disabled=S.over||S.q>0||S.r>=MAXR}
+function loop(ts){const dt=Math.min(.05,(ts-last)/1000||0);last=ts;if(!S.over)step(dt*sp);draw();hud();requestAnimationFrame(loop)}
+C.onclick=e=>{if(sup){sup=false;return}const r=C.getBoundingClientRect(),x=(e.clientX-r.left)*640/r.width,y=(e.clientY-r.top)*480/r.height;let k=-1;SLOTS.forEach((s,i)=>{if(Math.abs(x-s[0])<24&&Math.abs(y-s[1])<24)k=i});
+ if(S.mv&&U[S.sel]){if(k>=0&&k!=S.sel)drop(S.sel,k);else msg('이동 취소');S.mv=false;return}
+ S.sel=k};
+$('bd').onclick=()=>{const i=U.indexOf(null);if(S.over||i<0||S.gold<DRAW)return;S.gold-=DRAW;const r=Math.random();let t=0,a=RATE[0];while(r>=a&&t<3){t++;a+=RATE[t]}
+ const k=Math.random()<.35?1:0;U[i]={t,l:0,cd:0,k,a:[]};S.sel=i;msg(`${T[t].n} ${KIND[k].n}형 획득!`)};
+$('bu').onclick=()=>{const u=U[S.sel];if(S.over||!u||u.l>=5)return;const c=UPC[u.l];if(S.gold<c)return;S.gold-=c;
+ const ok=Math.random()<UP[u.l],pp=UP[u.l];u.a.push([pp,ok?1:0]);S.a.push([pp,ok?1:0]);
+ if(ok){u.l++;msg(`✨ 강화 성공! +${u.l}`)}else msg('💥 강화 실패')};
+$('bl').onclick=()=>{const u=U[S.sel];if(S.over||!u)return;S.gold+=REF[u.t]+10*u.l;U[S.sel]=null;msg('유닛을 판매했습니다');S.sel=-1};
+$('bm').onclick=()=>{if(S.over||!U[S.sel])return;S.mv=!S.mv;msg(S.mv?'옮길 칸을 누르세요 (유닛이 있으면 서로 자리를 바꿉니다)':'이동 취소')};
+$('bn').onclick=()=>{if(!S.over&&S.q==0&&S.r<MAXR)startRound()};
+$('bs').onclick=()=>{sp=sp%3+1;$('bs').textContent='속도 ×'+sp};
+$('go').onclick=()=>{newGame();$('ov').style.display='none'};
+function slotAt(x,y){let k=-1;SLOTS.forEach((s,i)=>{if(Math.abs(x-s[0])<24&&Math.abs(y-s[1])<24)k=i});return k}
+function cp(e){const r=C.getBoundingClientRect();return[(e.clientX-r.left)*640/r.width,(e.clientY-r.top)*480/r.height]}
+function drop(a,b){const A=U[a],B=U[b];if(!A||a==b)return;
+ if(!B){U[b]=A;U[a]=null;S.sel=b;msg('유닛을 옮겼습니다');return}
+ if(A.t==B.t&&A.k==B.k&&!A.s&&!B.s){const l=Math.max(A.l,B.l);U[a]=null;
+  if(Math.random()<MERGE){const s=1+Math.floor(Math.random()*3);U[b]={t:A.t,l,cd:0,k:A.k,s,a:[]};S.sel=b;msg(`🌟 합성 성공! ${SP[s].n} 유닛 탄생 (${SP[s].d})`)}
+  else{U[b]=null;S.sel=-1;msg('💨 합성 실패... 두 유닛이 사라졌습니다')}return}
+ U[a]=B;U[b]=A;S.sel=b;msg('유닛 자리를 바꿨습니다')}
+C.onpointerdown=e=>{if(S.over)return;const[x,y]=cp(e),k=slotAt(x,y);if(k>=0&&U[k]){drag={k,x,y,sx:x,sy:y,on:false};try{C.setPointerCapture(e.pointerId)}catch(_){}}};
+C.onpointermove=e=>{if(!drag)return;const[x,y]=cp(e);drag.x=x;drag.y=y;if(Math.hypot(x-drag.sx,y-drag.sy)>10)drag.on=true};
+C.onpointerup=e=>{if(!drag)return;const d=drag;drag=null;if(!d.on)return;sup=true;setTimeout(()=>{sup=false},60);const[x,y]=cp(e),k=slotAt(x,y);S.mv=false;if(k>=0&&k!=d.k)drop(d.k,k);else S.sel=d.k};
+C.onpointercancel=()=>{drag=null};
+newGame();S.over=true;ov('랜덤 디펜스','유닛을 뽑고 강화해서 20라운드를 가장 빨리 클리어하세요.<br>유닛은 단일 공격형(원)과 범위 공격 폭발형(네모)이 있습니다.<br>같은 등급·같은 종류 유닛 두 개를 끌어서 겹치면 합성됩니다(성공 30%). 성공하면 특수 유닛이 되고, 실패하면 두 유닛이 모두 사라집니다.<br>몬스터가 40마리 쌓이면 패배합니다. 라운드가 끝나면 “다음 라운드”로 먼저 넘길 수 있습니다.');
+requestAnimationFrame(loop);
+</script></body></html>
